@@ -1,0 +1,7 @@
+{
+  "cameras": {
+    "left": 2,
+    "right": 5,
+    "fps": 20
+  }
+}
