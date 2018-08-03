@@ -2,3 +2,4 @@
 /.idea/
 /captures/
 *.pyc
+/viz3d/config.json
