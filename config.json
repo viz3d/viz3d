@@ -1,7 +1,12 @@
 {
+  "workingDir": ".",
   "cameras": {
     "left": 2,
-    "right": 5,
-    "fps": 20
+    "right": 0,
+    "fps": 5
+  },
+  "log": {
+    "level": "DEBUG",
+    "format": "%(asctime)s %(message)s"
   }
 }
