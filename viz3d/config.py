@@ -1,7 +1,9 @@
 import json
 import logging
+import os.path
 
 _config = None
+
 
 def read_config():
     """
@@ -14,12 +16,36 @@ def read_config():
     if _config is not None:
         return _config
 
-    with open("config.json") as f:
+    if os.path.isfile("config.json"):
         # Load config
-        config = json.load(f)
-        # Parse
-        config["log"]["level"] = logging.getLevelName(config["log"]["level"])
-        config["calibration"]["checkerboard"]["dimension"] = tuple(config["calibration"]["checkerboard"]["dimension"])
-        # Store config
-        _config = config
-        return _config
+        with open("config.json") as f:
+            _config = json.load(f)
+    else:
+        # Create default config
+        _config = {
+            "workingDir": ".",
+            "cameras": {
+                "left": 2,
+                "right": 0,
+                "fps": 10
+            },
+            "calibration": {
+                "checkerboard": {
+                    "dimension": [9, 6],
+                    "size": 27.5
+                }
+            },
+            "log": {
+                "level": "DEBUG",
+                "format": "%(asctime)s %(message)s"
+            }
+        }
+        # Save config
+        with open("config.json", "w") as f:
+            json.dump(_config, f)
+
+    # Parse
+    _config["log"]["level"] = logging.getLevelName(_config["log"]["level"])
+    _config["calibration"]["checkerboard"]["dimension"] = tuple(_config["calibration"]["checkerboard"]["dimension"])
+
+    return _config
