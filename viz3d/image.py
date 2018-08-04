@@ -37,11 +37,11 @@ if __name__ == "__main__":
         grayLeft = cv.cvtColor(frameLeft, cv.COLOR_BGR2GRAY)
         grayRight = cv.cvtColor(frameRight, cv.COLOR_BGR2GRAY)
         # Mark checkerboard corners
-        calibration.mark_checkerboard_corners(grayLeft)
-        calibration.mark_checkerboard_corners(grayRight)
+        calibration.mark_checkerboard_corners(grayLeft, imageMarker=frameLeft)
+        calibration.mark_checkerboard_corners(grayRight, imageMarker=frameRight)
         # Show images
-        cv.imshow('frameLeft', grayLeft)
-        cv.imshow('frameRight', grayRight)
+        cv.imshow('frameLeft', frameLeft)
+        cv.imshow('frameRight', frameRight)
         # Check for key input. Close on 'q', capture image on 'c'
         key = cv.waitKey(1) & 0xFF
         if key == ord('q'):

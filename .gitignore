@@ -4,4 +4,4 @@
 *.pyc
 .directory
 /config.json
-
+/calibration.json
