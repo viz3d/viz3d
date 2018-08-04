@@ -19,6 +19,7 @@ def read_config():
         config = json.load(f)
         # Parse
         config["log"]["level"] = logging.getLevelName(config["log"]["level"])
+        config["calibration"]["checkerboard"]["dimension"] = tuple(config["calibration"]["checkerboard"]["dimension"])
         # Store config
         _config = config
         return _config

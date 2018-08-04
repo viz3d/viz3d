@@ -3,7 +3,13 @@
   "cameras": {
     "left": 2,
     "right": 0,
-    "fps": 5
+    "fps": 10
+  },
+  "calibration": {
+    "checkerboard": {
+      "dimension": [9, 6],
+      "size": 27.5
+    }
   },
   "log": {
     "level": "DEBUG",
