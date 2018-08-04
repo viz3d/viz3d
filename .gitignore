@@ -3,4 +3,4 @@
 /captures/
 *.pyc
 .directory
-
+/config.json
