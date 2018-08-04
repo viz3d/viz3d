@@ -42,7 +42,7 @@ def read_config():
         }
         # Save config
         with open("config.json", "w") as f:
-            json.dump(_config, f)
+            json.dump(_config, f, indent=4, sort_keys=True)
 
     # Parse
     _config["log"]["level"] = logging.getLevelName(_config["log"]["level"])
