@@ -17,7 +17,7 @@ logging.basicConfig(format=cfg["log"]["format"], level=cfg["log"]["level"])
 class CalibrationData:
 
     def __init__(self, left_camera_matrix, left_distortion_coeffs, right_camera_matrix, right_distortion_coeffs,
-                 stereo_rotation, stereo_translation, stereo_essential, stereo_fundamental):
+                 stereo_rotation, stereo_translation, stereo_essential, stereo_fundamental, image_size):
         self.left_camera_matrix = left_camera_matrix
         self.left_distortion_coeffs = left_distortion_coeffs
         self.right_camera_matrix = right_camera_matrix
@@ -26,6 +26,7 @@ class CalibrationData:
         self.stereo_translation = stereo_translation
         self.stereo_essential = stereo_essential
         self.stereo_fundamental = stereo_fundamental
+        self.image_size = image_size
 
     def save(self, filename):
         """
@@ -41,7 +42,8 @@ class CalibrationData:
                 "stereoRotation": self.stereo_rotation.tolist(),
                 "stereoTranslation": self.stereo_translation.tolist(),
                 "stereoEssential": self.stereo_essential.tolist(),
-                "stereoFundamental": self.stereo_fundamental.tolist()
+                "stereoFundamental": self.stereo_fundamental.tolist(),
+                "imageSize": self.image_size
             }
             json.dump(data, f, indent=4)
 
@@ -62,7 +64,8 @@ class CalibrationData:
                 np.array(data["stereoRotation"], dtype=np.float64),
                 np.array(data["stereoTranslation"], dtype=np.float64),
                 np.array(data["stereoEssential"], dtype=np.float64),
-                np.array(data["stereoFundamental"], dtype=np.float64)
+                np.array(data["stereoFundamental"], dtype=np.float64),
+                tuple(data["imageSize"])
             )
 
 
@@ -191,14 +194,23 @@ def main():
     # Calibration of the stereo values
     logger.info("Calibrating stereo")
     ret, _, _, _, _, stereo_rotation, stereo_translation, stereo_essential, stereo_fundamental = \
-        cv.stereoCalibrate(obj_points, left_image_points, right_image_points, left_camera_matrix,
-                           left_distortion_coeffs, right_camera_matrix, right_distortion_coeffs, image_shape)
+        cv.stereoCalibrate(obj_points,
+                           left_image_points,
+                           right_image_points,
+                           left_camera_matrix,
+                           left_distortion_coeffs,
+                           right_camera_matrix,
+                           right_distortion_coeffs,
+                           image_shape,
+                           # better results, known by experimentation
+                           criteria=(cv.TERM_CRITERIA_MAX_ITER + cv.TERM_CRITERIA_EPS, 100, 1e-5),
+                           flags=(cv.CALIB_FIX_ASPECT_RATIO + cv.CALIB_ZERO_TANGENT_DIST + cv.CALIB_SAME_FOCAL_LENGTH))
     logger.info("Calibrated camera. Reproject error: %f" % ret)
 
     # Store the data
     calibration_data = CalibrationData(left_camera_matrix, left_distortion_coeffs, right_camera_matrix, 
                                        right_distortion_coeffs, stereo_rotation, stereo_translation, 
-                                       stereo_essential, stereo_fundamental)
+                                       stereo_essential, stereo_fundamental, image_shape)
     filename = "calibration.json"
     calibration_data.save(filename)
     logger.info("Calibration data stored to %s" % filename)
