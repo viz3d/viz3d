@@ -17,8 +17,8 @@ def get_undistorted_rectification_maps(calibration_data):
     """
     Creates the undistortion and rectification maps from the calibration data for the left and right camera.
     :param calibration_data: The calibration data from calibration.py
-    :return: The left undistortion map, the left rectification map, the right undistortion map,
-    the right rectification map, the disparity to depth matrix
+    :return: A tuple containing the left undistortion map, the left rectification map, the right undistortion map,
+    the right rectification map. And the disparity to depth matrix
     """
     # Stereo rectification
     left_rectification, right_rectification, left_projection, right_projection, disp_to_depth, _, _ = \
@@ -47,20 +47,41 @@ def get_undistorted_rectification_maps(calibration_data):
         calibration_data.image_size,
         cv.CV_32F)
 
-    return left_undistortion_map, left_rectification_map, right_undistortion_map, right_rectification_map, disp_to_depth
+    return (left_undistortion_map, left_rectification_map, right_undistortion_map, right_rectification_map), disp_to_depth
+
+
+def rectify(left_image, right_image, (left_undistortion_map, left_rectification_map, right_undistortion_map, right_rectification_map)):
+    """
+    Rectifies left and right image using given rectification maps
+    :param left_image:
+    :param right_image:
+    :param a tuple containing the following maps as returned by get_undistorted_rectification_maps.
+    The tuple contains the left undistortion map, the left rectification map, the right undistortion map,
+    the right rectification map
+    :return:
+    """
+    # Recitify left and right images
+    left_rectified = cv.remap(left_image, left_undistortion_map, left_rectification_map, cv.INTER_LINEAR)
+    right_rectified = cv.remap(right_image, right_undistortion_map, right_rectification_map, cv.INTER_LINEAR)
+    return left_rectified, right_rectified
 
 
 def main():
+
+    # Load calibration data
     calibration_data = calibration.CalibrationData.load("calibration.json")
 
-    left_undistortion_map, left_rectification_map, right_undistortion_map, right_rectification_map, disp_to_depth = get_undistorted_rectification_maps(calibration_data)
+    # Calc rectification maps
+    rectification_maps, disp_to_depth = get_undistorted_rectification_maps(calibration_data)
 
-    left_image = cv.imread("captures/1533457912010-left.png", cv.IMREAD_GRAYSCALE)
-    right_image = cv.imread("captures/1533457912010-right.png", cv.IMREAD_GRAYSCALE)
+    # Load images
+    left_image = cv.imread("captures/1533479723660-left.png", cv.IMREAD_GRAYSCALE)
+    right_image = cv.imread("captures/1533479723660-right.png", cv.IMREAD_GRAYSCALE)
 
-    left_rectified = cv.remap(left_image, left_undistortion_map, left_rectification_map, cv.INTER_LINEAR)
-    right_rectified = cv.remap(right_image, right_undistortion_map, right_rectification_map, cv.INTER_LINEAR)
+    # Rectify images
+    left_rectified, right_rectified = rectify(left_image, right_image, rectification_maps)
 
+    # Show disparity maps with different block matching algorithms
     fig, subplots = plt.subplots(5, 5)
     for i in range(0, 5):
         numDisparities = 80 + i * 16 * 3
