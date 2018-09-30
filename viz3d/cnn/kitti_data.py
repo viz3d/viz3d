@@ -12,6 +12,14 @@ logger = logging.getLogger("image")
 logging.basicConfig(format="%(asctime)s %(message)s", level=logging.INFO)
 
 
+def preprocess_image(image):
+    image = image.astype(np.float32)
+    mean = image.mean()
+    std = image.std()
+    image = (image - mean) / std
+    return image
+
+
 def load_image_pairs(dataset_dir):
     # Index files
     files = []
@@ -25,11 +33,15 @@ def load_image_pairs(dataset_dir):
     # Retrieve samples
     samples = []
     for (file_left, file_right, file_disp) in files:
+        # Load images
         image_left = cv.imread(file_left, cv.IMREAD_GRAYSCALE)
         image_right = cv.imread(file_right, cv.IMREAD_GRAYSCALE)
         image_disp = cv.imread(file_disp, cv.IMREAD_GRAYSCALE)
-        assert image_left.shape == image_right.shape
-        assert image_left.shape == image_disp.shape
+        assert image_left.shape == image_right.shape == image_disp.shape
+        # Preprocess
+        image_left = preprocess_image(image_left)
+        image_right = preprocess_image(image_right)
+        # Yield
         yield (image_left, image_right, image_disp)
 
 
@@ -96,8 +108,8 @@ def build_samples_from_image(image_pair, num_samples, window_size=9, n_low=4, n_
             patch_right_neg = extract_patch(image_right, x_neg, y, window_size_half)
             patch_right_pos = extract_patch(image_right, x_pos, y, window_size_half)
 
-            yield (patch_left, patch_right_neg, [0, 1])
-            yield (patch_left, patch_right_pos, [1, 0])
+            yield (patch_left, patch_right_neg, 0)
+            yield (patch_left, patch_right_pos, 1)
 
             sample_counter += 2
 
@@ -115,9 +127,9 @@ def build_samples(image_pairs, num_samples=int(1e6), window_size=9, n_high=8, n_
 
     samples_per_image = math.ceil(num_samples / len(image_pairs))
 
-    samples_left = np.zeros([num_samples, window_size, window_size], dtype=np.uint8)
-    samples_right = np.zeros([num_samples, window_size, window_size], dtype=np.uint8)
-    samples_class = np.zeros([num_samples, 2], dtype=np.uint8)
+    samples_left = np.zeros([num_samples, window_size, window_size], dtype=np.float32)
+    samples_right = np.zeros([num_samples, window_size, window_size], dtype=np.float32)
+    samples_class = np.zeros([num_samples], dtype=np.uint8)
 
     sample_index = 0
     stop = False
@@ -147,7 +159,7 @@ def build_samples(image_pairs, num_samples=int(1e6), window_size=9, n_high=8, n_
 
 def plot_sample(sample_left, sample_right, sample_class):
     fig, (ax1, ax2) = plt.subplots(1, 2)
-    if sample_class[0] == 0:
+    if sample_class == 0:
         fig.suptitle("neg {}".format(sample_class))
     else:
         fig.suptitle("pos {}".format(sample_class))
@@ -158,13 +170,15 @@ def plot_sample(sample_left, sample_right, sample_class):
 
 def main():
 
+    # Fix seeds
+    random.seed(42)
     np.random.seed(42)
 
     # Load images & shuffle
-    image_pairs = list(load_image_pairs("data_stereo_flow/training"))
+    image_pairs = list(load_image_pairs("data/data_stereo_flow/training"))
     random.shuffle(image_pairs)
 
-    samples_left, samples_right, samples_class = build_samples(image_pairs)
+    samples_left, samples_right, samples_class = build_samples(image_pairs, num_samples=int(1e6)) #, window_size=45, n_high=40, n_low=20, p_high=5)
     np.save("data/samples_left", samples_left)
     np.save("data/samples_right", samples_right)
     np.save("data/samples_class", samples_class)
