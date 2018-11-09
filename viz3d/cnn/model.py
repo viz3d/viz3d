@@ -68,6 +68,10 @@ def train():
     # Calculate loss
     loss = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=target_class, logits=output, name="loss")
 
+    # Calculate accuracy
+    prediction = tf.cast(tf.argmax(output, axis=1), tf.int32)
+    accuracy = tf.reduce_mean(tf.cast(tf.equal(prediction, target_class), tf.float32))
+
     # Define training step
     train_step = tf.train.AdamOptimizer().minimize(loss)
     learning_rate = tf.placeholder(tf.float32, shape=[])
@@ -96,7 +100,7 @@ def train():
             batch_train_left, batch_train_right, batch_train_class = extract_batch(batch_size, samples_train_left, samples_train_right, samples_train_class)
 
             # Do training step
-            _, train_loss_value = session.run([train_step, tf.reduce_mean(loss)], feed_dict={
+            _, train_loss_value, train_accuracy_value = session.run([train_step, tf.reduce_mean(loss), accuracy], feed_dict={
                 image_left: batch_train_left,
                 image_right: batch_train_right,
                 target_class: batch_train_class,
@@ -106,14 +110,14 @@ def train():
             # Extract a random training batch
             batch_validation_left, batch_validation_right, batch_validation_class = extract_batch(batch_size, samples_validation_left, samples_validation_right, samples_validation_class)
 
-            validation_loss_value = session.run(tf.reduce_mean(loss), feed_dict={
+            validation_loss_value, validation_accuracy_value = session.run([tf.reduce_mean(loss), accuracy], feed_dict={
                 image_left: batch_validation_left,
                 image_right: batch_validation_right,
                 target_class: batch_validation_class
             })
 
             # Log progress
-            print("Loss at epoch %i: %.08f %.08f" % (epoch, train_loss_value, validation_loss_value))
+            print("%i: %.08f %.08f %.08f %.08f" % (epoch, train_loss_value, train_accuracy_value, validation_loss_value, validation_accuracy_value))
 
             # Store network
             saver.save(session, "models/experimental_cnn/model_weights-%i" % epoch)
