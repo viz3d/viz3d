@@ -3,6 +3,7 @@
 /captures/
 /data_stereo_flow/
 /data/
+/models/
 *.pyc
 .directory
 /config.json

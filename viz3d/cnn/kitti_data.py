@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 
 # Create logger
 logger = logging.getLogger("image")
-logging.basicConfig(format="%(asctime)s %(message)s", level=logging.INFO)
+logging.basicConfig(format="%(asctime)s : %(name)s : %(message)s", level=logging.INFO)
 
 
 def preprocess_image(image):
@@ -175,13 +175,37 @@ def main():
     np.random.seed(42)
 
     # Load images & shuffle
-    image_pairs = list(load_image_pairs("data/data_stereo_flow/training"))
+    image_pairs = list(load_image_pairs("data_stereo_flow/training"))
     random.shuffle(image_pairs)
 
-    samples_left, samples_right, samples_class = build_samples(image_pairs, num_samples=int(1e6)) #, window_size=45, n_high=40, n_low=20, p_high=5)
-    np.save("data/samples_left", samples_left)
-    np.save("data/samples_right", samples_right)
-    np.save("data/samples_class", samples_class)
+    # Split into train, validation and test
+    n = len(image_pairs)
+    # Proportions
+    train_percent = .5
+    validation_percent = .25
+    test_percent = .25
+    # Sizes
+    train_size = int(n * train_percent)
+    validation_size = int(n * validation_percent)
+    test_size = int(n * test_percent)
+    # Split
+    image_pairs_train = image_pairs[0:train_size]
+    image_pairs_validation = image_pairs[train_size:train_size+validation_size]
+    image_pairs_test = image_pairs[train_size+validation_size:]
+
+    for (name, current_image_pairs, percent) in zip(["train", "validation", "test"],
+                                                    [image_pairs_train, image_pairs_validation, image_pairs_test],
+                                                    [train_percent, validation_percent, test_percent]):
+        # Get number of samples
+        num_samples = int(2e6 * percent)
+        # Log
+        logger.info("Building %s samples, with samples %r" % (name, num_samples))
+        # Build samples
+        samples_left, samples_right, samples_class = build_samples(current_image_pairs, num_samples=num_samples) #, window_size=45, n_high=40, n_low=20, p_high=5)
+        # Save
+        np.save("data/samples_%s_left" % name, samples_left)
+        np.save("data/samples_%s_right" % name, samples_right)
+        np.save("data/samples_%s_class" % name, samples_class)
 
 
 if __name__ == "__main__":

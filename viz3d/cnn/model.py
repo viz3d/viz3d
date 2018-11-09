@@ -73,16 +73,18 @@ def train():
     learning_rate = tf.placeholder(tf.float32, shape=[])
     #train_step = tf.train.GradientDescentOptimizer(learning_rate).minimize(loss)
 
-    # Load data
-    samples_left = np.load("data/samples_left.npy")
-    samples_right = np.load("data/samples_right.npy")
-    samples_class = np.load("data/samples_class.npy")
-    # Prepare data
-    samples_left = samples_left[..., np.newaxis]
-    samples_right = samples_right[..., np.newaxis]
-    samples_class = samples_class.astype(np.int32)
+    samples_train_class, samples_train_left, samples_train_right = load_samples("train")
+    samples_validation_class, samples_validation_left, samples_validation_right = load_samples("validation")
 
     #tf.initialize_all_variables()
+
+    # Save network
+    # Save graph definition
+    with open("models/experimental_cnn/model_definition.pb", "w") as f:
+        graph_def = tf.get_default_graph().as_graph_def()
+        f.write(str(graph_def))
+    # Network weight saver
+    saver = tf.train.Saver()
 
     # Create a session and start training
     with tf.Session() as session:
@@ -90,25 +92,54 @@ def train():
         tf.global_variables_initializer().run()
 
         for epoch in range(1000000):
-            # Sample a random batch
-            batch_indices = np.random.randint(0, samples_left.shape[0], batch_size)
-            #batch_indices = np.arange(batch_size)
-            batch_left = samples_left[batch_indices]
-            batch_right = samples_right[batch_indices]
-            batch_class = samples_class[batch_indices]
+            # Extract a random training batch
+            batch_train_left, batch_train_right, batch_train_class = extract_batch(batch_size, samples_train_left, samples_train_right, samples_train_class)
 
             # Do training step
-            _, loss_value = session.run([train_step, tf.reduce_mean(loss)], feed_dict={
-                image_left: batch_left,
-                image_right: batch_right,
-                target_class: batch_class,
+            _, train_loss_value = session.run([train_step, tf.reduce_mean(loss)], feed_dict={
+                image_left: batch_train_left,
+                image_right: batch_train_right,
+                target_class: batch_train_class,
                 learning_rate: .01
             })
 
+            # Extract a random training batch
+            batch_validation_left, batch_validation_right, batch_validation_class = extract_batch(batch_size, samples_validation_left, samples_validation_right, samples_validation_class)
+
+            validation_loss_value = session.run(tf.reduce_mean(loss), feed_dict={
+                image_left: batch_validation_left,
+                image_right: batch_validation_right,
+                target_class: batch_validation_class
+            })
+
             # Log progress
-            print("Loss at epoch {}: {}".format(epoch, loss_value))
+            print("Loss at epoch %i: %.08f %.08f" % (epoch, train_loss_value, validation_loss_value))
+
+            # Store network
+            saver.save(session, "models/experimental_cnn/model_weights-%i" % epoch)
 
 
+def extract_batch(batch_size, samples_left, samples_right, samples_class):
+    # Sample a random batch
+    batch_indices = np.random.randint(0, samples_left.shape[0], batch_size)
+    # batch_indices = np.arange(batch_size)
+    batch_left = samples_left[batch_indices]
+    batch_right = samples_right[batch_indices]
+    batch_class = samples_class[batch_indices]
+    
+    return batch_left, batch_right, batch_class
+
+
+def load_samples(group, filename_pattern="data/samples_%s_%s.npy"):
+    # Load data
+    samples_left = np.load(filename_pattern % (group, "left"))
+    samples_right = np.load(filename_pattern % (group, "right"))
+    samples_class = np.load(filename_pattern % (group, "class"))
+    # Prepare data
+    samples_left = samples_left[..., np.newaxis]
+    samples_right = samples_right[..., np.newaxis]
+    samples_class = samples_class.astype(np.int32)
+    return samples_class, samples_left, samples_right
 
 
 def main():
