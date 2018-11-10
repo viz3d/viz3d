@@ -45,7 +45,7 @@ def load_image_pairs(dataset_dir):
         yield (image_left, image_right, image_disp)
 
 
-def build_samples_from_image(image_pair, num_samples, window_size=9, n_low=4, n_high=8, p_high=1):
+def build_pair_samples_from_image(image_pair, num_samples, window_size=9, n_low=4, n_high=8, p_high=1):
     assert window_size % 2 == 1
 
     # Calculate intervals for sample offsets
@@ -67,12 +67,7 @@ def build_samples_from_image(image_pair, num_samples, window_size=9, n_low=4, n_
     start_y = window_size_half
     end_y = height - window_size_half
     # Create sample points
-    x_values = np.arange(start_x, end_x)
-    y_values = np.arange(start_y, end_y)
-    xx, yy = np.meshgrid(x_values, y_values)
-    xx = xx.reshape(-1)
-    yy = yy.reshape(-1)
-    points = np.stack([xx, yy], axis=1)
+    points = get_points(end_x, end_y, start_x, start_y)
     np.random.shuffle(points)
 
     # Create all samples
@@ -102,11 +97,11 @@ def build_samples_from_image(image_pair, num_samples, window_size=9, n_low=4, n_
                 continue
 
             # Create left patch
-            patch_left = extract_patch(image_left, x, y, window_size_half)
+            patch_left = extract_patch(image_left, x, y, window_size_half, window_size_half)
 
             # Create right neg and pos patch
-            patch_right_neg = extract_patch(image_right, x_neg, y, window_size_half)
-            patch_right_pos = extract_patch(image_right, x_pos, y, window_size_half)
+            patch_right_neg = extract_patch(image_right, x_neg, y, window_size_half, window_size_half)
+            patch_right_pos = extract_patch(image_right, x_pos, y, window_size_half, window_size_half)
 
             yield (patch_left, patch_right_neg, 0)
             yield (patch_left, patch_right_pos, 1)
@@ -114,16 +109,7 @@ def build_samples_from_image(image_pair, num_samples, window_size=9, n_low=4, n_
             sample_counter += 2
 
 
-def extract_patch(image,  x, y, window_size_half):
-    x_start = x - window_size_half
-    x_end = x + window_size_half + 1
-    y_start = y - window_size_half
-    y_end = y + window_size_half + 1
-    patch = image[y_start : y_end, x_start : x_end]
-    return patch
-
-
-def build_samples(image_pairs, num_samples=int(1e6), window_size=9, n_high=8, n_low=4, p_high=1):
+def build_pair_samples(image_pairs, num_samples=int(1e6), window_size=9, n_high=8, n_low=4, p_high=1):
 
     samples_per_image = math.ceil(num_samples / len(image_pairs))
 
@@ -136,7 +122,7 @@ def build_samples(image_pairs, num_samples=int(1e6), window_size=9, n_high=8, n_
     for pair_index, image_pair in enumerate(image_pairs):
 
         # Extract samples
-        for sample in build_samples_from_image(image_pair, samples_per_image, window_size=window_size, n_high=n_high, n_low=n_low, p_high=p_high):
+        for sample in build_pair_samples_from_image(image_pair, samples_per_image, window_size=window_size, n_high=n_high, n_low=n_low, p_high=p_high):
             samples_left[sample_index] = sample[0]
             samples_right[sample_index] = sample[1]
             samples_class[sample_index] = sample[2]
@@ -157,6 +143,104 @@ def build_samples(image_pairs, num_samples=int(1e6), window_size=9, n_high=8, n_
     return samples_left, samples_right, samples_class
 
 
+def build_row_samples(image_pairs, num_samples=int(1e6), window_size=19, max_disparity=100):
+    assert window_size % 2 == 1
+
+    samples_per_image = math.ceil(num_samples / len(image_pairs))
+
+    samples_left = np.zeros([num_samples, window_size, window_size], dtype=np.float32)
+    samples_right = np.zeros([num_samples, window_size, window_size + max_disparity * 2], dtype=np.float32)
+    samples_class = np.zeros([num_samples], dtype=np.uint8)
+
+    sample_index = 0
+    stop = False
+    for pair_index, image_pair in enumerate(image_pairs):
+
+        # Get images
+        image_left = image_pair[0]
+        image_right = image_pair[1]
+        image_disparity = image_pair[2]
+
+        # Create samples for image pair
+        # Get sample bounds
+        width = image_disparity.shape[1]
+        height = image_disparity.shape[0]
+        window_size_half = int(window_size / 2)
+        # Get random points
+        points = get_points(width, height, 0, 0)
+        np.random.shuffle(points)
+
+        # Iterate until we have enough samples for this image pair
+        pair_samples_index = 0
+        point_counter = 0
+        while pair_samples_index < samples_per_image:
+            # Assert that there are still remaining points
+            assert(point_counter < points.shape[0])
+
+            # Get point for current points
+            x, y = points[point_counter]
+            point_counter += 1
+
+            # Check if disparity value exists
+            disparity = image_disparity[y, x]
+            if disparity == 0:
+                continue
+
+            # Check if left and right windows are in y bounds (shared y)
+            if not (window_size_half <= y <= height - window_size_half):
+                continue
+
+            # Check if left window is in x bounds
+            if not (window_size_half <= x <= width - window_size_half):
+                continue
+
+            # Check if right window is in x bounds
+            x_right = x - disparity
+            if not (window_size_half + max_disparity <= x_right <= width - window_size_half - max_disparity):
+                continue
+
+            # Extract sample
+            sample_left = extract_patch(image_left, x, y, window_size_half, window_size_half)
+            sample_right = extract_patch(image_right, x_right, y, max_disparity + window_size_half, window_size_half)
+            sample_class = max_disparity
+
+            # Store samples
+            samples_left[sample_index] = sample_left
+            samples_right[sample_index] = sample_right
+            samples_class[sample_index] = sample_class
+            sample_index += 1
+            pair_samples_index += 1
+
+        # Log
+        logger.info("At image pair %r, got %r samples" % (pair_index, sample_index))
+
+        # Break if num_samples was reached
+        if stop:
+            break
+
+    return samples_left, samples_right, samples_class
+
+
+def get_points(end_x, end_y, start_x, start_y):
+    # Create sample points
+    x_values = np.arange(start_x, end_x)
+    y_values = np.arange(start_y, end_y)
+    xx, yy = np.meshgrid(x_values, y_values)
+    xx = xx.reshape(-1)
+    yy = yy.reshape(-1)
+    points = np.stack([xx, yy], axis=1)
+    return points
+
+
+def extract_patch(image, x, y, half_width, half_height):
+    x_start = x - half_width
+    x_end = x + half_width + 1
+    y_start = y - half_height
+    y_end = y + half_height + 1
+    patch = image[y_start : y_end, x_start : x_end]
+    return patch
+
+
 def plot_sample(sample_left, sample_right, sample_class):
     fig, (ax1, ax2) = plt.subplots(1, 2)
     if sample_class == 0:
@@ -169,13 +253,14 @@ def plot_sample(sample_left, sample_right, sample_class):
 
 
 def main():
+    window_size = 19
 
     # Fix seeds
     random.seed(42)
     np.random.seed(42)
 
     # Load images & shuffle
-    image_pairs = list(load_image_pairs("data_stereo_flow/training"))
+    image_pairs = list(load_image_pairs("data/data_stereo_flow/training"))
     random.shuffle(image_pairs)
 
     # Split into train, validation and test
@@ -201,11 +286,11 @@ def main():
         # Log
         logger.info("Building %s samples, with samples %r" % (name, num_samples))
         # Build samples
-        samples_left, samples_right, samples_class = build_samples(current_image_pairs, num_samples=num_samples) #, window_size=45, n_high=40, n_low=20, p_high=5)
+        samples_left, samples_right, samples_class = build_row_samples(current_image_pairs, num_samples=num_samples, window_size=window_size) #, window_size=45, n_high=40, n_low=20, p_high=5)
         # Save
-        np.save("data/samples_%s_left" % name, samples_left)
-        np.save("data/samples_%s_right" % name, samples_right)
-        np.save("data/samples_%s_class" % name, samples_class)
+        np.save("data/samples_row_w%i_%s_left" % (window_size, name), samples_left)
+        np.save("data/samples_row_w%i_%s_right" % (window_size, name), samples_right)
+        np.save("data/samples_row_w%i_%s_class" % (window_size, name), samples_class)
 
 
 if __name__ == "__main__":
