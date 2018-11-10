@@ -9,7 +9,7 @@ from keras.callbacks import EarlyStopping, TensorBoard
 
 # Create logger
 logger = logging.getLogger(__name__)
-logging.basicConfig(format="%(asctime)s %(message)s", level=logging.INFO)
+logging.basicConfig(format="%(asctime)s : %(name)s : %(message)s", level=logging.INFO)
 
 
 def create_model(image_shape):
