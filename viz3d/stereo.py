@@ -50,7 +50,7 @@ def get_undistorted_rectification_maps(calibration_data):
     return (left_undistortion_map, left_rectification_map, right_undistortion_map, right_rectification_map), disp_to_depth
 
 
-def rectify(left_image, right_image, (left_undistortion_map, left_rectification_map, right_undistortion_map, right_rectification_map)):
+def rectify(left_image, right_image, rectify_data):
     """
     Rectifies left and right image using given rectification maps
     :param left_image:
@@ -60,6 +60,7 @@ def rectify(left_image, right_image, (left_undistortion_map, left_rectification_
     the right rectification map
     :return:
     """
+    left_undistortion_map, left_rectification_map, right_undistortion_map, right_rectification_map = rectify_data
     # Recitify left and right images
     left_rectified = cv.remap(left_image, left_undistortion_map, left_rectification_map, cv.INTER_LINEAR)
     right_rectified = cv.remap(right_image, right_undistortion_map, right_rectification_map, cv.INTER_LINEAR)
@@ -75,8 +76,8 @@ def main():
     rectification_maps, disp_to_depth = get_undistorted_rectification_maps(calibration_data)
 
     # Load images
-    left_image = cv.imread("captures/1533479723660-left.png", cv.IMREAD_GRAYSCALE)
-    right_image = cv.imread("captures/1533479723660-right.png", cv.IMREAD_GRAYSCALE)
+    left_image = cv.imread("captures/1533457916824-left.png", cv.IMREAD_GRAYSCALE)
+    right_image = cv.imread("captures/1533457916824-right.png", cv.IMREAD_GRAYSCALE)
 
     # Rectify images
     left_rectified, right_rectified = rectify(left_image, right_image, rectification_maps)
