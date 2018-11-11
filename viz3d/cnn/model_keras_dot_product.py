@@ -1,11 +1,10 @@
-import matplotlib.pyplot as plt
-import numpy as np
 import logging
 from os.path import join
-from keras.models import Sequential, Model
-from keras.layers import Dense, Conv2D, Flatten, concatenate, Input, Activation, Dot
-from keras.callbacks import EarlyStopping, TensorBoard
+import numpy as np
 import keras.backend as K
+from keras.callbacks import EarlyStopping, TensorBoard
+from keras.layers import Conv2D, Input, Activation, BatchNormalization, RepeatVector, Reshape, Lambda
+from keras.models import Sequential, Model
 
 
 # Create logger
@@ -13,73 +12,101 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(format="%(asctime)s : %(name)s : %(message)s", level=logging.INFO)
 
 
-def create_model(image_shape):
+def create_model_single(vector_size):
 
-    # Single model (siamese network applied to both images)
-    filters = 32
-    kernel_size = [5, 5]
+    input_shape = (None, None, 1)
+
+    # Single model (conv network applied to each image patch)
+    filters = 64
+    kernel_size = [3, 3]
+    batchnorm_epsilon = 1e-3
     model_single = Sequential()
-    model_single.add(Conv2D(filters, kernel_size, name="conv1", activation="relu", input_shape=image_shape))
-    model_single.add(Flatten())
-    model_single.add(Dense(200, activation="relu"))
-    model_single.add(Dense(64, activation="relu"))
 
-    # Combine features from both single models
-    image_left_input = Input(shape=image_shape, name="InputLeft")
-    image_right_input = Input(shape=image_shape, name="InputRight")
-    image_left_features = model_single(image_left_input)
-    image_right_features = model_single(image_right_input)
+    # Add input conv layer
+    model_single.add(Conv2D(filters, kernel_size, input_shape=input_shape))
+    model_single.add(BatchNormalization(epsilon=batchnorm_epsilon))
+    model_single.add(Activation("relu"))
 
-    # Calculate dot product
-    features_double = Dot(axes=1)([image_left_features, image_right_features])
+    # Add 7 conv layers with relu activation
+    for i in range(7):
+        model_single.add(Conv2D(filters, kernel_size))
+        model_single.add(BatchNormalization(epsilon=batchnorm_epsilon))
+        model_single.add(Activation("relu"))
 
-    # Calculate sigmoid for binary classification
-    features_double = Activation("sigmoid")(features_double)
+    # Add output conv layer (linear activation to keep information from negative values)
+    model_single.add(Conv2D(vector_size, kernel_size))
+    model_single.add(BatchNormalization(epsilon=batchnorm_epsilon))
 
-    model_double = Model(inputs=[image_left_input, image_right_input], outputs=[features_double], name="MatchingModel")
-    return model_double, model_single
+    return model_single
+
+
+def create_model_training(model_single, window_size, max_disparity, vector_size):
+    num_classes = max_disparity * 2 + 1
+
+    # Apply single model on left image window
+    input_left = Input(shape=(window_size, window_size, 1))
+    features_left = model_single(input_left)
+    features_left = Reshape((vector_size,))(features_left)  # Flatten features
+    features_left = RepeatVector(num_classes)(features_left)  # Left window exists once, so repeat it for all classes
+
+    # Apply single model on right image windows
+    input_right = Input(shape=(window_size, window_size + max_disparity * 2, 1))
+    features_right = model_single(input_right)
+    features_right = Reshape((num_classes, vector_size))(features_right)  # Remove first dimension (y) as it is always 1
+
+    # Calculate the dot product from left and right features
+    # [(?, num_classes, vector_size), (?, num_classes, vector_size)] -> (?, num_classes)
+    dot_combined = Lambda(lambda x: K.sum(x[0] * x[1], axis=-1, keepdims=False))([features_left, features_right])
+    dot_combined = Activation("softmax")(dot_combined)  # Apply softmax smoothing
+
+    # Create complete training model from the functional api
+    model_training = Model(inputs=[input_left, input_right], outputs=[dot_combined])
+    return model_training
 
 
 def train():
-    window_size = 9
-    batch_size = 128
-    image_shape = (window_size, window_size, 1)
+    window_size = 19
+    max_disparity = 100
+    batch_size = 32
     working_dir = join("models", "experimental_cnn_dot")
+    vector_size = 64  # Size of the vector representing each window
 
-    # Apply model
-    model_double, model_single = create_model(image_shape)
+    # Create models
+    # The single model is applied to each window_size*window_size image patch
+    # The training model wraps the single model for training into our architecture
+    model_single = create_model_single(vector_size)
+    model_training = create_model_training(model_single, window_size, max_disparity, vector_size)
 
-    model_double.compile(optimizer="adam",
-                  loss="binary_crossentropy",
+    # Compile training model
+    model_training.compile(optimizer="adam",
+                  loss="categorical_crossentropy",
                   metrics=["accuracy"])
 
-    samples_train_class, samples_train_left, samples_train_right = load_samples("train")
-    samples_validation_class, samples_validation_left, samples_validation_right = load_samples("validation")
+    # Load training data
+    filename_pattern = "data/samples_row_w%i_%%s_%%s.npy" % window_size
+    num_classes = max_disparity * 2 + 1
+    samples_train_class, samples_train_left, samples_train_right = load_samples("train", filename_pattern, num_classes)
+    samples_validation_class, samples_validation_left, samples_validation_right = load_samples("validation", filename_pattern, num_classes)
 
     callbacks = [
         EarlyStopping(monitor="val_acc", min_delta=0, patience=20, verbose=1, mode="auto"),
         TensorBoard(log_dir=join(working_dir, "log"), histogram_freq=0, write_graph=True, write_images=True, batch_size=batch_size)
     ]
 
-    model_double.fit(x=[samples_train_left, samples_train_right], y=samples_train_class, batch_size=batch_size,
-              epochs=int(1e6), verbose=0, callbacks=callbacks,
-              validation_data=([samples_validation_left, samples_validation_right], samples_validation_class))
+    # Fit model
+    model_training.fit(x=[samples_train_left, samples_train_right],
+                       y=samples_train_class,
+                       batch_size=batch_size,
+                       epochs=int(1e6),
+                       verbose=0,
+                       callbacks=callbacks,
+                       validation_data=([samples_validation_left, samples_validation_right], samples_validation_class))
 
+    # Store model
     model_single.save(join(working_dir, "model.h5"))
 
 
-def extract_batch(batch_size, samples_left, samples_right, samples_class):
-    # Sample a random batch
-    batch_indices = np.random.randint(0, samples_left.shape[0], batch_size)
-    # batch_indices = np.arange(batch_size)
-    batch_left = samples_left[batch_indices]
-    batch_right = samples_right[batch_indices]
-    batch_class = samples_class[batch_indices]
-
-    return batch_left, batch_right, batch_class
-
-
-def load_samples(group, filename_pattern="data/samples_%s_%s.npy"):
+def load_samples(group, filename_pattern, num_classes):
     # Load data
     samples_left = np.load(filename_pattern % (group, "left"))
     samples_right = np.load(filename_pattern % (group, "right"))
@@ -87,8 +114,17 @@ def load_samples(group, filename_pattern="data/samples_%s_%s.npy"):
     # Prepare data
     samples_left = samples_left[..., np.newaxis]
     samples_right = samples_right[..., np.newaxis]
+    # Three pixel error
+    # Smooth the one hot encoding for similar disparities
+    samples_class_onehot = np.zeros([samples_class_index.shape[0], num_classes])
+    samples_indices = np.arange(samples_class_onehot.shape[0])
+    samples_class_onehot[samples_indices, samples_class_index - 2] = 0.05
+    samples_class_onehot[samples_indices, samples_class_index - 1] = 0.2
+    samples_class_onehot[samples_indices, samples_class_index + 0] = 0.5
+    samples_class_onehot[samples_indices, samples_class_index + 1] = 0.2
+    samples_class_onehot[samples_indices, samples_class_index + 2] = 0.05
 
-    return samples_class_index, samples_left, samples_right
+    return samples_class_onehot, samples_left, samples_right
 
 
 def main():

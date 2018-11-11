@@ -187,16 +187,16 @@ def build_row_samples(image_pairs, num_samples=int(1e6), window_size=19, max_dis
                 continue
 
             # Check if left and right windows are in y bounds (shared y)
-            if not (window_size_half <= y <= height - window_size_half):
+            if not (window_size_half <= y < height - window_size_half):
                 continue
 
             # Check if left window is in x bounds
-            if not (window_size_half <= x <= width - window_size_half):
+            if not (window_size_half <= x < width - window_size_half):
                 continue
 
             # Check if right window is in x bounds
             x_right = x - disparity
-            if not (window_size_half + max_disparity <= x_right <= width - window_size_half - max_disparity):
+            if not (window_size_half + max_disparity <= x_right < width - window_size_half - max_disparity):
                 continue
 
             # Extract sample
@@ -210,6 +210,11 @@ def build_row_samples(image_pairs, num_samples=int(1e6), window_size=19, max_dis
             samples_class[sample_index] = sample_class
             sample_index += 1
             pair_samples_index += 1
+
+            # Break if num_samples is reached
+            if sample_index >= num_samples:
+                stop = True
+                break
 
         # Log
         logger.info("At image pair %r, got %r samples" % (pair_index, sample_index))
@@ -260,7 +265,7 @@ def main():
     np.random.seed(42)
 
     # Load images & shuffle
-    image_pairs = list(load_image_pairs("data/data_stereo_flow/training"))
+    image_pairs = list(load_image_pairs("data_stereo_flow/training"))
     random.shuffle(image_pairs)
 
     # Split into train, validation and test
@@ -282,7 +287,7 @@ def main():
                                                     [image_pairs_train, image_pairs_validation, image_pairs_test],
                                                     [train_percent, validation_percent, test_percent]):
         # Get number of samples
-        num_samples = int(2e6 * percent)
+        num_samples = int(2e5 * percent)
         # Log
         logger.info("Building %s samples, with samples %r" % (name, num_samples))
         # Build samples
