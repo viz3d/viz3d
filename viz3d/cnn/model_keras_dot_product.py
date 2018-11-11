@@ -2,9 +2,10 @@ import logging
 from os.path import join
 import numpy as np
 import keras.backend as K
-from keras.callbacks import EarlyStopping, TensorBoard
+from keras.callbacks import EarlyStopping, TensorBoard, ModelCheckpoint
 from keras.layers import Conv2D, Input, Activation, BatchNormalization, RepeatVector, Reshape, Lambda
 from keras.models import Sequential, Model
+from viz3d.cnn.manual_stop_callback import ManualStopCallback
 
 
 # Create logger
@@ -90,14 +91,16 @@ def train():
 
     callbacks = [
         EarlyStopping(monitor="val_acc", min_delta=0, patience=20, verbose=1, mode="auto"),
-        TensorBoard(log_dir=join(working_dir, "log"), histogram_freq=0, write_graph=True, write_images=True, batch_size=batch_size)
+        TensorBoard(log_dir=join(working_dir, "log"), histogram_freq=0, write_graph=True, write_images=True, batch_size=batch_size),
+        ModelCheckpoint(join(working_dir, "model_checkpoint.h5"), save_best_only=True),
+        ManualStopCallback(join(working_dir, "stop"))
     ]
 
     # Fit model
     model_training.fit(x=[samples_train_left, samples_train_right],
                        y=samples_train_class,
                        batch_size=batch_size,
-                       epochs=int(1e6),
+                       epochs=int(1),
                        verbose=0,
                        callbacks=callbacks,
                        validation_data=([samples_validation_left, samples_validation_right], samples_validation_class))
