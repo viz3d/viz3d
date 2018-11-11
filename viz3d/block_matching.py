@@ -6,6 +6,7 @@ import cv2 as cv
 import matplotlib.pyplot as plt
 import logging
 from keras.models import load_model
+from viz3d.cnn.kitti_data import preprocess_image
 
 
 # Create logger
@@ -184,6 +185,7 @@ class DisparityCnnDot(DisparityCalculator):
 
         # Get feature vector for left window
         features_left = self.features_left[y_window, left_x_window]
+        features_left = features_left[np.newaxis, ...]
 
         # Calculate dot products for each combination of left feature vector and right feature vectors
         classification = np.sum(features_right_row * features_left, axis=-1)  # We skip softmax here, as it does not change the argmax
@@ -201,10 +203,16 @@ class DisparityCnnDot(DisparityCalculator):
 
 def main():
     path = "data/data_stereo_flow/training/"
-    image_left = cv.imread(join(path, "colored_0", "000001_10.png"), cv.IMREAD_GRAYSCALE)
-    image_right = cv.imread(join(path, "colored_1", "000001_10.png"), cv.IMREAD_GRAYSCALE)
-    disparity_map_correct = cv.imread(join(path, "disp_noc", "000001_10.png"), cv.IMREAD_GRAYSCALE)
+    image_name = "000160_10.png"
+    image_left = cv.imread(join(path, "colored_0", image_name), cv.IMREAD_GRAYSCALE)
+    image_right = cv.imread(join(path, "colored_1", image_name), cv.IMREAD_GRAYSCALE)
+    disparity_map_correct = cv.imread(join(path, "disp_noc", image_name), cv.IMREAD_GRAYSCALE)
 
+    # Preprocess images
+    image_left = preprocess_image(image_left)
+    image_right = preprocess_image(image_right)
+
+    # Calculate disparity map
     #disparity_calculator = DisparityCnn("models/experimental_cnn/model.h5")
     #disparity_calculator = DisparityMse(100, 10000000)
     disparity_calculator = DisparityCnnDot("models/experimental_cnn_dot/model.h5", 100)
