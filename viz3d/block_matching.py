@@ -153,6 +153,52 @@ class DisparityCnn(DisparityWindowed):
         return costs
 
 
+class DisparityCnnDot(DisparityCalculator):
+
+    def __init__(self, model_path, max_disparity):
+        self.model = load_model(model_path)
+        self.max_disparity = max_disparity
+
+    def prepare(self, image_left, image_right, window_size):
+        # Apply model to both images to extract features
+        logger.info("Starting to calculate features")
+        # Prepare inputs
+        image_left_batch = image_left[np.newaxis, ..., np.newaxis]
+        image_right_batch = image_right[np.newaxis, ..., np.newaxis]
+        # Calculate
+        self.features_left = self.model.predict(image_left_batch)
+        self.features_right = self.model.predict(image_right_batch)
+        # Remove batch indices
+        self.features_left = self.features_left[0]
+        self.features_right = self.features_right[0]
+        logger.info(" ... Done")
+
+    def calculate_disparity(self, y_window, left_x_window):
+
+        # Get feature row for right windows
+        # Calculate row extending max_disparity to the left and right, but not out of bounds
+        row_start = max(0, left_x_window - self.max_disparity)  # Do not extend to negative values
+        row_end = left_x_window + 1
+        # Get row
+        features_right_row = self.features_right[y_window, row_start:row_end]
+
+        # Get feature vector for left window
+        features_left = self.features_left[y_window, left_x_window]
+
+        # Calculate dot products for each combination of left feature vector and right feature vectors
+        classification = np.sum(features_right_row * features_left, axis=-1)  # We skip softmax here, as it does not change the argmax
+
+        # Calculate disparity
+        match = np.argmax(classification)
+        disparity = NO_DISPARITY_VALUE
+        if match != -1:
+            right_x = row_start + match
+            disparity = left_x_window - right_x
+
+        return disparity
+
+
+
 def main():
     path = "data/data_stereo_flow/training/"
     image_left = cv.imread(join(path, "colored_0", "000001_10.png"), cv.IMREAD_GRAYSCALE)
@@ -160,8 +206,9 @@ def main():
     disparity_map_correct = cv.imread(join(path, "disp_noc", "000001_10.png"), cv.IMREAD_GRAYSCALE)
 
     #disparity_calculator = DisparityCnn("models/experimental_cnn/model.h5")
-    disparity_calculator = DisparityMse(100, 10000000)
-    block_matcher = BlockMatcher(disparity_calculator, 9)
+    #disparity_calculator = DisparityMse(100, 10000000)
+    disparity_calculator = DisparityCnnDot("models/experimental_cnn_dot/model.h5", 100)
+    block_matcher = BlockMatcher(disparity_calculator, 19)
     disparity_map = block_matcher.calculate_disparity_map(image_left, image_right)
 
     #disparity_map_correct_flat = disparity_map_correct[4:-4, 4:-4].reshape(-1)
