@@ -13,6 +13,17 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(format="%(asctime)s : %(name)s : %(message)s", level=logging.INFO)
 
 
+def create_n_pixel_error(n):
+    def n_pixel_error(x_corr, x_pred):
+        class_corr = K.argmax(x_corr, axis=-1)
+        class_pred = K.argmax(x_pred, axis=-1)
+        diff = K.abs(class_corr - class_pred)
+        errors = K.less_equal(diff, n)
+        errors = K.cast(errors, "float32")
+        return errors
+    return n_pixel_error
+
+
 def create_model_single(vector_size):
 
     input_shape = (None, None, 1)
@@ -89,7 +100,7 @@ def train():
     # Compile training model
     model_training.compile(optimizer="adam",
                   loss="categorical_crossentropy",
-                  metrics=["accuracy"])
+                  metrics=["accuracy", create_n_pixel_error(3)])
 
     # Load training data
     filename_pattern = "data/samples_row_w%i_%%s_%%s.npy" % window_size
@@ -105,10 +116,11 @@ def train():
     ]
 
     # Fit model
+    logger.info("Starting training")
     model_training.fit(x=[samples_train_left, samples_train_right],
                        y=samples_train_class,
                        batch_size=batch_size,
-                       epochs=int(1),
+                       epochs=int(1e3),
                        verbose=0,
                        callbacks=callbacks,
                        validation_data=([samples_validation_left, samples_validation_right], samples_validation_class))
