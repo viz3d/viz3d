@@ -3,7 +3,7 @@ from os.path import join
 import numpy as np
 import keras.backend as K
 from keras.callbacks import EarlyStopping, TensorBoard, ModelCheckpoint
-from keras.layers import Conv2D, Input, Activation, BatchNormalization, RepeatVector, Reshape, Lambda
+from keras.layers import Conv2D, Input, Activation, BatchNormalization, RepeatVector, Reshape, Lambda, Dropout
 from keras.models import Sequential, Model
 from viz3d.cnn.manual_stop_callback import ManualStopCallback
 
@@ -24,19 +24,27 @@ def create_model_single(vector_size):
     model_single = Sequential()
 
     # Add input conv layer
-    model_single.add(Conv2D(filters, kernel_size, input_shape=input_shape))
+    model_single.add(Conv2D(filters, [5, 5], input_shape=input_shape))
     model_single.add(BatchNormalization(epsilon=batchnorm_epsilon))
     model_single.add(Activation("relu"))
+    model_single.add(Dropout(0.5))
+
+    model_single.add(Conv2D(filters, [5, 5]))
+    model_single.add(BatchNormalization(epsilon=batchnorm_epsilon))
+    model_single.add(Activation("relu"))
+    model_single.add(Dropout(0.5))
 
     # Add 7 conv layers with relu activation
-    for i in range(7):
+    for i in range(4):
         model_single.add(Conv2D(filters, kernel_size))
         model_single.add(BatchNormalization(epsilon=batchnorm_epsilon))
         model_single.add(Activation("relu"))
+        model_single.add(Dropout(0.5))
 
     # Add output conv layer (linear activation to keep information from negative values)
     model_single.add(Conv2D(vector_size, kernel_size))
     model_single.add(BatchNormalization(epsilon=batchnorm_epsilon))
+    model_single.add(Dropout(0.5))
 
     return model_single
 
@@ -69,7 +77,7 @@ def train():
     window_size = 19
     max_disparity = 100
     batch_size = 32
-    working_dir = join("models", "experimental_cnn_dot")
+    working_dir = join("models", "experimental_cnn_dot_dropout")
     vector_size = 64  # Size of the vector representing each window
 
     # Create models
@@ -90,7 +98,7 @@ def train():
     samples_validation_class, samples_validation_left, samples_validation_right = load_samples("validation", filename_pattern, num_classes)
 
     callbacks = [
-        EarlyStopping(monitor="val_acc", min_delta=0, patience=20, verbose=1, mode="auto"),
+        EarlyStopping(monitor="val_acc", min_delta=0, patience=5, verbose=1, mode="auto"),
         TensorBoard(log_dir=join(working_dir, "log"), histogram_freq=0, write_graph=True, write_images=True, batch_size=batch_size),
         ModelCheckpoint(join(working_dir, "model_checkpoint.h5"), save_best_only=True),
         ManualStopCallback(join(working_dir, "stop"))
