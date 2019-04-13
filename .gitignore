@@ -1,6 +1,7 @@
 /venv/
 /.idea/
 /captures/
+/captures-full/
 /data_stereo_flow/
 /data/
 /models/

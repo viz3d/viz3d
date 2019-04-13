@@ -27,7 +27,8 @@ def read_config():
             "cameras": {
                 "left": 2,
                 "right": 0,
-                "fps": 10
+                "fps": 10,
+                "depthCameraColor": 3
             },
             "calibration": {
                 "checkerboard": {
