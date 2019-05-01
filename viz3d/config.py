@@ -34,12 +34,19 @@ def read_config():
                 "checkerboard": {
                     "dimension": [9, 6],
                     "size": 27.5
+                },
+                "circlesGrid": {
+                    "dimension": [
+                        11,
+                        4
+                    ]
                 }
             },
             "log": {
                 "level": "DEBUG",
                 "format": "%(asctime)s %(message)s"
-            }
+            },
+            "openniRedist": "OpenNI directory not set"
         }
         # Save config
         with open("config.json", "w") as f:
@@ -48,5 +55,7 @@ def read_config():
     # Parse
     _config["log"]["level"] = logging.getLevelName(_config["log"]["level"])
     _config["calibration"]["checkerboard"]["dimension"] = tuple(_config["calibration"]["checkerboard"]["dimension"])
+    _config["calibration"]["circlesGrid"]["dimension"] = tuple(_config["calibration"]["circlesGrid"]["dimension"])
+    _config["openniRedist"] = str(_config["openniRedist"])
 
     return _config

@@ -43,8 +43,8 @@ if __name__ == "__main__":
         imageMarkerRight = np.copy(frameRight)
 
         # Mark checkerboard corners
-        calibration.mark_checkerboard_corners(grayLeft, imageMarker=imageMarkerLeft)
-        calibration.mark_checkerboard_corners(grayRight, imageMarker=imageMarkerRight)
+        calibration.mark_calibration_points(grayLeft, imageMarker=imageMarkerLeft)
+        calibration.mark_calibration_points(grayRight, imageMarker=imageMarkerRight)
 
         # Show images
         cv.imshow('frameLeft', imageMarkerLeft)

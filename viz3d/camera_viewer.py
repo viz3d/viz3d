@@ -6,6 +6,9 @@ import viz3d.config as config
 import logging
 import time
 import os
+import viz3d.calibration as calibration
+import sys
+import viz3d.stereo as stereo
 
 # Load config
 cfg = config.read_config()
@@ -16,8 +19,15 @@ logging.basicConfig(format=cfg["log"]["format"], level=cfg["log"]["level"])
 
 
 def main():
+    show_rectified = len(sys.argv) == 2 and sys.argv[1] == "rectify"
 
-    openni2.initialize("/home/t/development/programs/OpenNI_2.3.0.55/Linux/OpenNI-Linux-x64-2.3.0.55/Redist/")
+    if show_rectified:
+        calibration_stereo = calibration.CalibrationData.load("calibration-stereo.json")
+        calibration_stereo_depth = calibration.CalibrationData.load("calibration-stereo-depth.json")
+        rectification_stereo, _ = stereo.get_undistorted_rectification_maps(calibration_stereo)
+        rectification_stereo_depth, _ = stereo.get_undistorted_rectification_maps(calibration_stereo_depth)
+
+    openni2.initialize(cfg["openniRedist"])
 
     dev = openni2.Device.open_any()
     print(dev.get_device_info())
@@ -63,30 +73,35 @@ def main():
 
     logger.info("Streams initialized")
 
+    # Ensure captures folder exists
+    folder = os.path.join(cfg["workingDir"], "captures-full")
+    if not os.path.isdir(folder):
+        logger.info("Created captures-full folder")
+        os.mkdir(folder)
+
     while True:
 
         ir_frame = ir_stream.read_frame()
-        ir_image = normalize_frame(ir_frame)
-        cv.imshow("IR Stream", ir_image.astype(np.float32) / 1024)
+        ir_image = parse_frame(ir_frame)
 
         depth_frame = depth_stream.read_frame()
-        depth_image = normalize_frame(depth_frame)
+        depth_image = parse_frame(depth_frame)
+
+        color_image, color_image_marked = process_stream(color_stream)
+        left_image, left_image_marked = process_stream(left_stream)
+        right_image, right_image_marked = process_stream(right_stream)
+
+        if show_rectified:
+            _, _ = stereo.rectify(left_image, depth_image, rectification_stereo_depth)
+            _, color_image = stereo.rectify(left_image, color_image, rectification_stereo_depth)
+            left_image, right_image = stereo.rectify(left_image, right_image, rectification_stereo)
+            left_image_marked, right_image_marked = stereo.rectify(left_image, right_image, rectification_stereo)
+
+        cv.imshow("IR Stream", ir_image.astype(np.float32) / 1024)
         cv.imshow("Depth Stream", depth_image.astype(np.float32) / (4 * 1000))
-
-        ret, color_image = color_stream.read()  # produces a BGR image
-        color_image = color_image[:, ::-1, :]  # reverse x-axis
-        color_image = cv.cvtColor(color_image, cv.COLOR_BGR2GRAY)
         cv.imshow("Color Stream", color_image)
-
-        ret, left_image = left_stream.read()
-        left_image = left_image[:, ::-1, :]
-        left_image = cv.cvtColor(left_image, cv.COLOR_BGR2GRAY)
-        cv.imshow("Stereo Left Stream", left_image)
-
-        ret, right_image = right_stream.read()
-        right_image = right_image[:, ::-1, :]
-        right_image = cv.cvtColor(right_image, cv.COLOR_BGR2GRAY)
-        cv.imshow("Stereo Right Stream", right_image)
+        cv.imshow("Stereo Left Stream", left_image_marked)
+        cv.imshow("Stereo Right Stream", right_image_marked)
 
         # Check for key input. Close on 'q', plot images on 'p', capture images on 'c'
         key = cv.waitKey(1) & 0xFF
@@ -104,7 +119,6 @@ def main():
             plt.show()
         elif key == ord('c'):
             epoch = int(time.time() * 1000)
-            folder = os.path.join(cfg["workingDir"], "captures-full")
             cv.imwrite(os.path.join(folder, "%d-ir.tif" % epoch), (ir_image.astype(np.float32) * (255 / 1024)).astype(np.uint8))
             cv.imwrite(os.path.join(folder, "%d-depth.tif" % epoch), depth_image)
             cv.imwrite(os.path.join(folder, "%d-color.tif" % epoch), color_image)
@@ -122,7 +136,21 @@ def main():
     logger.info("Released all resources.")
 
 
-def normalize_frame(frame):
+def process_stream(color_stream):
+    ret, image = color_stream.read()  # produces a BGR image
+    if not ret:
+        raise RuntimeError("Could not read stream!")
+
+    image = image[:, ::-1, :]  # reverse x-axis
+    image = cv.cvtColor(image, cv.COLOR_BGR2GRAY)
+
+    image_marked = image.copy()
+    calibration.mark_calibration_points(image, imageMarker=image_marked, type="circlesGrid")
+
+    return image, image_marked
+
+
+def parse_frame(frame):
     frame_np = np.frombuffer(frame.get_buffer_as_uint16(), np.uint16)
     frame_np = frame_np.reshape(frame.height, frame.width)
     return frame_np
@@ -130,4 +158,3 @@ def normalize_frame(frame):
 
 if __name__ == "__main__":
     main()
-

@@ -69,19 +69,26 @@ class CalibrationData:
             )
 
 
-def mark_checkerboard_corners(image, imageMarker=None):
+def mark_calibration_points(image, imageMarker=None, type="checkerboard"):
     """
     Draws the checkerboard corners on the image
     :param image: the image to process in grayscale
     :param imageMarker: optional. Draws the markers on this image, can be the same as image
     :return: the corners found
     """
-    dimension = cfg["calibration"]["checkerboard"]["dimension"]
-    found, corners = cv.findChessboardCorners(image, dimension, None)
+
+    # Mark calibration points
+    dimension = cfg["calibration"][type]["dimension"]
+    if type == "checkerboard":
+        found, corners = cv.findChessboardCorners(image, dimension, None)
+    else:
+        found, corners = cv.findCirclesGrid(image, dimension, flags=cv.CALIB_CB_ASYMMETRIC_GRID)
+
     if found:
-        # termination criteria
-        criteria = (cv.TERM_CRITERIA_EPS + cv.TERM_CRITERIA_MAX_ITER, 30, 0.001)
-        corners = cv.cornerSubPix(image, corners, (11, 11), (-1, -1), criteria)
+        if type == "checkerboard":
+            # termination criteria
+            criteria = (cv.TERM_CRITERIA_EPS + cv.TERM_CRITERIA_MAX_ITER, 30, 0.001)
+            corners = cv.cornerSubPix(image, corners, (11, 11), (-1, -1), criteria)
 
         # Draw corners
         if imageMarker is not None:
@@ -91,7 +98,7 @@ def mark_checkerboard_corners(image, imageMarker=None):
     return found, None
 
 
-def get_points(left_images, right_images):
+def get_points(image_lists, grid_type="checkerboard"):
     """
     Calculates the position of the corners from the checkerboard pattern
     :param left_images: list of the names from the left images
@@ -99,47 +106,53 @@ def get_points(left_images, right_images):
     :return: As numpy arrays: real world object points in millimetres,
     left image points in pixels, right image points in pixels
     """
-    assert len(left_images) == len(right_images), "Different file count for left and right images!"
+    assert all(len(image_list) == len(image_lists[0]) for image_list in image_lists), \
+        "Different file count for image sets!"
+    image_count = len(image_lists[0])
 
     obj_points = [] # real world positions in millimetres
-    left_img_points = [] # left image positions in pixels
-    right_img_points = [] # right image positions in pixels
+    point_lists = [] # image positions in pixels for each image list
 
     # Generate the general object points (same for every image, the checkerboard does not change)
-    dimension = cfg["calibration"]["checkerboard"]["dimension"]
+    dimension = cfg["calibration"][grid_type]["dimension"]
     obj_point = np.zeros((dimension[0] * dimension[1], 3), dtype=np.float32)
     index = 0
-    for y in range(dimension[1]):
-        for x in range(dimension[0]):
-            obj_point[index][0] = x
-            obj_point[index][1] = y
-            index += 1
-    obj_point = obj_point * cfg["calibration"]["checkerboard"]["size"]
+    if grid_type == "checkerboard":
+        for y in range(dimension[1]):
+            for x in range(dimension[0]):
+                obj_point[index][0] = x
+                obj_point[index][1] = y
+                index += 1
+    elif grid_type == "circlesGrid":
+        for y in range(dimension[1]):
+            for x in range(dimension[0]):
+                obj_point[index][0] = 2 * x + y % 2
+                obj_point[index][1] = y
+                index += 1
+    obj_point = obj_point * cfg["calibration"][grid_type]["size"]
 
     # Calculate image points
     image_shape = None
-    for i in range(len(left_images)):
-        # Read images as grayscale
-        left = cv.imread(left_images[i], cv.IMREAD_GRAYSCALE)
-        right = cv.imread(right_images[i], cv.IMREAD_GRAYSCALE)
+    for i in range(image_count):
+        # Read corresponding image from each image list as grayscale
+        images = [cv.imread(image_list[i], cv.IMREAD_GRAYSCALE) for image_list in image_lists]
 
         # Store the shape of the image in reversed order (height x width -> width x height)
-        image_shape = left.shape[::-1]
+        image_shape = images[0].shape[::-1]
 
         # Mark the corner positions
-        left_found, left_corners = mark_checkerboard_corners(left)
-        right_found, right_corners = mark_checkerboard_corners(right)
+        mark_results = [mark_calibration_points(image, type=grid_type) for image in images]
 
         # Only process if both images have a pattern found
-        if left_found and right_found:
+        found_all = all(result[0] for result in mark_results)
+        if found_all:
             obj_points.append(obj_point)
-            left_img_points.append(left_corners)
-            right_img_points.append(right_corners)
+            corners = [result[1] for result in mark_results]
+            point_lists.append(corners)
 
     # Convert to numpy arrays
     return np.asarray(obj_points, dtype=np.float32), \
-           np.asarray(left_img_points, dtype=np.float32), \
-           np.asarray(right_img_points, dtype=np.float32), \
+           np.asarray(point_lists, dtype=np.float32), \
            image_shape
 
 
@@ -174,25 +187,11 @@ def calibrate_camera(obj_points, image_points, image_shape):
     return camera_matrix, distortion_coeffs
 
 
-def main():
-    # Find captures
-    captures = os.path.join(cfg["workingDir"], "captures")
-    left_images = [os.path.join(captures, f) for f in os.listdir(captures) if f.endswith("-left.png")]
-    left_images.sort()
-    right_images = [os.path.join(captures, f) for f in os.listdir(captures) if f.endswith("-right.png")]
-    right_images.sort()
+def stereo_calibrate(left_image_points, right_image_points,
+                     left_camera_matrix, left_distortion_coeffs,
+                     right_camera_matrix, right_distortion_coeffs,
+                     image_shape, obj_points):
 
-    # Get points in real world and on the images
-    obj_points, left_image_points, right_image_points, image_shape = get_points(left_images, right_images)
-
-    # Calibration of the intrinsic values
-    logger.info("Calibrating left camera")
-    left_camera_matrix, left_distortion_coeffs = calibrate_camera(obj_points, left_image_points, image_shape)
-    logger.info("Calibrating right camera")
-    right_camera_matrix, right_distortion_coeffs = calibrate_camera(obj_points, right_image_points, image_shape)
-
-    # Calibration of the stereo values
-    logger.info("Calibrating stereo")
     ret, _, _, _, _, stereo_rotation, stereo_translation, stereo_essential, stereo_fundamental = \
         cv.stereoCalibrate(obj_points,
                            left_image_points,
@@ -204,16 +203,62 @@ def main():
                            image_shape,
                            # better results, known by experimentation
                            criteria=(cv.TERM_CRITERIA_MAX_ITER + cv.TERM_CRITERIA_EPS, 100, 1e-5),
-                           flags=(cv.CALIB_FIX_ASPECT_RATIO + cv.CALIB_ZERO_TANGENT_DIST + cv.CALIB_SAME_FOCAL_LENGTH))
-    logger.info("Calibrated camera. Reproject error: %f" % ret)
+                           flags=(cv.CALIB_FIX_ASPECT_RATIO))
+
+    calibration_data = CalibrationData(left_camera_matrix, left_distortion_coeffs, right_camera_matrix,
+                                       right_distortion_coeffs, stereo_rotation, stereo_translation,
+                                       stereo_essential, stereo_fundamental, image_shape)
+    logger.info("Calibrated stereo cameras. Reproject error: %f" % ret)
+    return calibration_data
+
+
+def main():
+    # Find captures
+    keys = ["color", "left", "right"]
+    captures_folders = os.path.join(cfg["workingDir"], "captures-full")
+    ids = [name[:name.index("-")] for name in os.listdir(captures_folders) if name.endswith(keys[0] + ".tif")]
+    ids.sort()
+    image_lists = [[os.path.join(captures_folders, id + "-" + key + ".tif") for id in ids] for key in keys]
+
+    # Get points in real world and on the images
+    logger.info("Loading image points")
+    obj_points, images_points, image_shape = get_points(image_lists, grid_type="circlesGrid")
+
+    # Calibration of the intrinsic values
+    camera_matrices_list = []
+    distortion_coeffs_list = []
+    for index, key in enumerate(keys):
+        logger.info("Calibrating camera %s" % key)
+        image_points = images_points[:, index, ...]  # image points for current camera / key
+        camera_matrix, distortion_coeffs = calibrate_camera(obj_points, image_points, image_shape)
+        camera_matrices_list.append(camera_matrix)
+        distortion_coeffs_list.append(distortion_coeffs)
+
+    # Calibration of the stereo pairs
+    camera_left = keys.index("left")
+    camera_right = keys.index("right")
+    camera_color = keys.index("color")
+    stereo_camera_calibration = stereo_calibrate(images_points[:, camera_left, ...],
+                                                 images_points[:, camera_right, ...],
+                                                 camera_matrices_list[camera_left],
+                                                 distortion_coeffs_list[camera_left],
+                                                 camera_matrices_list[camera_right],
+                                                 distortion_coeffs_list[camera_right],
+                                                 image_shape,
+                                                 obj_points)
+    stereo_depth_calibration = stereo_calibrate(images_points[:, camera_left, ...],
+                                                images_points[:, camera_color, ...],
+                                                camera_matrices_list[camera_left],
+                                                distortion_coeffs_list[camera_left],
+                                                camera_matrices_list[camera_color],
+                                                distortion_coeffs_list[camera_color],
+                                                image_shape,
+                                                obj_points)
 
     # Store the data
-    calibration_data = CalibrationData(left_camera_matrix, left_distortion_coeffs, right_camera_matrix, 
-                                       right_distortion_coeffs, stereo_rotation, stereo_translation, 
-                                       stereo_essential, stereo_fundamental, image_shape)
-    filename = "calibration.json"
-    calibration_data.save(filename)
-    logger.info("Calibration data stored to %s" % filename)
+    stereo_camera_calibration.save("calibration-stereo.json")
+    stereo_depth_calibration.save("calibration-stereo-depth.json")
+    logger.info("Calibration data stored.")
 
     # Example loading code for testing
     # loaded = CalibrationData.load("calibration.json")
