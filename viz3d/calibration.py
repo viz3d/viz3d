@@ -1,98 +1,43 @@
 import cv2 as cv
 import numpy as np
-import json
 import os
 import os.path
 import config
 import logging
+from camera_setup import SingleCameraSetup, StereoCameraSetup
 
 # Load config
 cfg = config.read_config()
 
 # Create logger
-logger = logging.getLogger("calibration")
+logger = logging.getLogger(__name__)
 logging.basicConfig(format=cfg["log"]["format"], level=cfg["log"]["level"])
 
 
-class CalibrationData:
-
-    def __init__(self, left_camera_matrix, left_distortion_coeffs, right_camera_matrix, right_distortion_coeffs,
-                 stereo_rotation, stereo_translation, stereo_essential, stereo_fundamental, image_size):
-        self.left_camera_matrix = left_camera_matrix
-        self.left_distortion_coeffs = left_distortion_coeffs
-        self.right_camera_matrix = right_camera_matrix
-        self.right_distortion_coeffs = right_distortion_coeffs
-        self.stereo_rotation = stereo_rotation
-        self.stereo_translation = stereo_translation
-        self.stereo_essential = stereo_essential
-        self.stereo_fundamental = stereo_fundamental
-        self.image_size = image_size
-
-    def save(self, filename):
-        """
-        Save calibration data to file
-        :param filename: the name of the file
-        """
-        with open(filename, "w") as f:
-            data = {
-                "leftCameraMatrix": self.left_camera_matrix.tolist(),
-                "leftDistortionCoeffs": self.left_distortion_coeffs.tolist(),
-                "rightCameraMatrix": self.right_camera_matrix.tolist(),
-                "rightDistortionCoeffs": self.right_distortion_coeffs.tolist(),
-                "stereoRotation": self.stereo_rotation.tolist(),
-                "stereoTranslation": self.stereo_translation.tolist(),
-                "stereoEssential": self.stereo_essential.tolist(),
-                "stereoFundamental": self.stereo_fundamental.tolist(),
-                "imageSize": self.image_size
-            }
-            json.dump(data, f, indent=4)
-
-    @staticmethod
-    def load(filename):
-        """
-        Constructs a CalibrationData object from file
-        :param filename: the name of the JSON store
-        :return: the CalibrationData object
-        """
-        with open(filename) as f:
-            data = json.load(f)
-            return CalibrationData(
-                np.array(data["leftCameraMatrix"], dtype=np.float64),
-                np.array(data["leftDistortionCoeffs"], dtype=np.float64),
-                np.array(data["rightCameraMatrix"], dtype=np.float64),
-                np.array(data["rightDistortionCoeffs"], dtype=np.float64),
-                np.array(data["stereoRotation"], dtype=np.float64),
-                np.array(data["stereoTranslation"], dtype=np.float64),
-                np.array(data["stereoEssential"], dtype=np.float64),
-                np.array(data["stereoFundamental"], dtype=np.float64),
-                tuple(data["imageSize"])
-            )
-
-
-def mark_calibration_points(image, imageMarker=None, type="checkerboard"):
+def mark_calibration_points(image, image_marker=None, type="checkerboard"):
     """
     Draws the checkerboard corners on the image
     :param image: the image to process in grayscale
-    :param imageMarker: optional. Draws the markers on this image, can be the same as image
+    :param image_marker: optional. Draws the markers on this image, can be the same as image
     :return: the corners found
     """
 
     # Mark calibration points
     dimension = cfg["calibration"][type]["dimension"]
     if type == "checkerboard":
-        found, corners = cv.findChessboardCorners(image, dimension, None)
+        found, corners = cv.findChessboardCorners(image, dimension, None, flags=cv.CALIB_CB_ADAPTIVE_THRESH)
     else:
         found, corners = cv.findCirclesGrid(image, dimension, flags=cv.CALIB_CB_ASYMMETRIC_GRID)
 
     if found:
         if type == "checkerboard":
             # termination criteria
-            criteria = (cv.TERM_CRITERIA_EPS + cv.TERM_CRITERIA_MAX_ITER, 30, 0.001)
+            criteria = (cv.TERM_CRITERIA_EPS + cv.TERM_CRITERIA_MAX_ITER, 30, 0.01)
             corners = cv.cornerSubPix(image, corners, (11, 11), (-1, -1), criteria)
 
         # Draw corners
-        if imageMarker is not None:
-            cv.drawChessboardCorners(imageMarker, dimension, corners, found)
+        if image_marker is not None:
+            cv.drawChessboardCorners(image_marker, dimension, corners, found)
 
         return found, corners
     return found, None
@@ -184,55 +129,58 @@ def calibrate_camera(obj_points, image_points, image_shape):
 
     # Log
     logger.info("Calibrated camera. Reproject errors: rms=%f norm_l2=%f" % (rms_error, l2_error))
-    return camera_matrix, distortion_coeffs
+
+    setup = SingleCameraSetup(camera_matrix, distortion_coeffs, tuple(image_shape))
+    return setup
 
 
-def stereo_calibrate(left_image_points, right_image_points,
-                     left_camera_matrix, left_distortion_coeffs,
-                     right_camera_matrix, right_distortion_coeffs,
-                     image_shape, obj_points):
+def stereo_calibrate(left_image_points, right_image_points, setup_left, setup_right, image_shape, obj_points):
 
+    # Stereo calibrate using left and right camera intrinsics (i.e. setups)
     ret, _, _, _, _, stereo_rotation, stereo_translation, stereo_essential, stereo_fundamental = \
         cv.stereoCalibrate(obj_points,
                            left_image_points,
                            right_image_points,
-                           left_camera_matrix,
-                           left_distortion_coeffs,
-                           right_camera_matrix,
-                           right_distortion_coeffs,
+                           setup_left.camera_matrix,
+                           setup_left.distortion_coeffs,
+                           setup_right.camera_matrix,
+                           setup_right.distortion_coeffs,
                            image_shape,
-                           # better results, known by experimentation
-                           criteria=(cv.TERM_CRITERIA_MAX_ITER + cv.TERM_CRITERIA_EPS, 100, 1e-5),
-                           flags=(cv.CALIB_FIX_ASPECT_RATIO))
+                           criteria=(cv.TERM_CRITERIA_MAX_ITER + cv.TERM_CRITERIA_EPS, 100, 1e-5),  # Optimization termination criteria
+                           flags=cv.CALIB_FIX_ASPECT_RATIO | cv.CALIB_FIX_INTRINSIC)  # fix intrinsics because they were already provided (and given as setups)
 
-    calibration_data = CalibrationData(left_camera_matrix, left_distortion_coeffs, right_camera_matrix,
-                                       right_distortion_coeffs, stereo_rotation, stereo_translation,
-                                       stereo_essential, stereo_fundamental, image_shape)
+    # Log
     logger.info("Calibrated stereo cameras. Reproject error: %f" % ret)
-    return calibration_data
+
+    setup = StereoCameraSetup(setup_left, setup_right, stereo_rotation, stereo_translation, stereo_essential, stereo_fundamental)
+    return setup
+
+
+def find_images(captures_folders, keys):
+    ids = [name[:name.index("-")] for name in os.listdir(captures_folders) if name.endswith(keys[0] + ".tif")]
+    ids.sort()
+    logger.info("Found %d scenes for calibration.", len(ids))
+    image_lists = [[os.path.join(captures_folders, id + "-" + key + ".tif") for id in ids] for key in keys]
+    return image_lists
 
 
 def main():
     # Find captures
     keys = ["color", "left", "right"]
     captures_folders = os.path.join(cfg["workingDir"], "captures-full")
-    ids = [name[:name.index("-")] for name in os.listdir(captures_folders) if name.endswith(keys[0] + ".tif")]
-    ids.sort()
-    image_lists = [[os.path.join(captures_folders, id + "-" + key + ".tif") for id in ids] for key in keys]
+    image_lists = find_images(captures_folders, keys)
 
     # Get points in real world and on the images
     logger.info("Loading image points")
     obj_points, images_points, image_shape = get_points(image_lists, grid_type="circlesGrid")
 
     # Calibration of the intrinsic values
-    camera_matrices_list = []
-    distortion_coeffs_list = []
+    setup_single_list = []
     for index, key in enumerate(keys):
         logger.info("Calibrating camera %s" % key)
         image_points = images_points[:, index, ...]  # image points for current camera / key
-        camera_matrix, distortion_coeffs = calibrate_camera(obj_points, image_points, image_shape)
-        camera_matrices_list.append(camera_matrix)
-        distortion_coeffs_list.append(distortion_coeffs)
+        setup_single = calibrate_camera(obj_points, image_points, image_shape)
+        setup_single_list.append(setup_single)
 
     # Calibration of the stereo pairs
     camera_left = keys.index("left")
@@ -240,18 +188,14 @@ def main():
     camera_color = keys.index("color")
     stereo_camera_calibration = stereo_calibrate(images_points[:, camera_left, ...],
                                                  images_points[:, camera_right, ...],
-                                                 camera_matrices_list[camera_left],
-                                                 distortion_coeffs_list[camera_left],
-                                                 camera_matrices_list[camera_right],
-                                                 distortion_coeffs_list[camera_right],
+                                                 setup_single_list[camera_left],
+                                                 setup_single_list[camera_right],
                                                  image_shape,
                                                  obj_points)
     stereo_depth_calibration = stereo_calibrate(images_points[:, camera_left, ...],
                                                 images_points[:, camera_color, ...],
-                                                camera_matrices_list[camera_left],
-                                                distortion_coeffs_list[camera_left],
-                                                camera_matrices_list[camera_color],
-                                                distortion_coeffs_list[camera_color],
+                                                 setup_single_list[camera_left],
+                                                 setup_single_list[camera_color],
                                                 image_shape,
                                                 obj_points)
 
@@ -261,7 +205,7 @@ def main():
     logger.info("Calibration data stored.")
 
     # Example loading code for testing
-    # loaded = CalibrationData.load("calibration.json")
+    # loaded = StereoCameraSetup.load("calibration-stereo.json")
     # print(loaded)
 
 
